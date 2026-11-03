@@ -3,7 +3,9 @@ import path from "node:path";
 
 // Almacenamiento clave-valor para el estado propio de Socio y el ERP demo.
 //   memory   → RAM del proceso (tests)
-//   file     → .data/<clave>.json (desarrollo local)
+//   file     → .data/<clave>.json (desarrollo local; en Vercel, /tmp de la instancia)
+//   upstash  → Upstash Redis del Marketplace de Vercel (KV_REST_API_URL / KV_REST_API_TOKEN, que la
+//              integración inyecta sola). Es lo recomendado en producción. Se elige solo si están esas variables.
 //   supabase → tabla socio_kv en un proyecto Supabase PROPIO de Socio (deploy en Vercel, donde
 //              varias instancias tienen que ver el mismo estado). Nunca el del cliente.
 //
@@ -28,7 +30,9 @@ const memoryKv: KV = {
   },
 };
 
-const dir = () => process.env.SOCIO_DATA_DIR || path.join(process.cwd(), ".data");
+// En Vercel el código es de solo lectura: solo /tmp se puede escribir.
+const dir = () =>
+  process.env.SOCIO_DATA_DIR || (process.env.VERCEL ? "/tmp/socio" : path.join(process.cwd(), ".data"));
 
 const fileKv: KV = {
   async get(key) {
@@ -67,10 +71,40 @@ function supabaseKv(): KV {
   };
 }
 
+function upstashKv(): KV {
+  const url = (process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || "").replace(/\/$/, "");
+  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || "";
+  if (!url || !token) throw new Error("Faltan KV_REST_API_URL / KV_REST_API_TOKEN (Upstash)");
+  const cmd = async (args: string[]) => {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`upstash ${args[0]} ${res.status}: ${await res.text()}`);
+    return ((await res.json()) as { result: unknown }).result;
+  };
+  const ns = (k: string) => `socio:${k}`;
+  return {
+    async get(k) {
+      const v = await cmd(["GET", ns(k)]);
+      return typeof v === "string" ? JSON.parse(v) : null;
+    },
+    async set(k, value) {
+      await cmd(["SET", ns(k), JSON.stringify(value)]);
+    },
+  };
+}
+
+const hasUpstash = () => Boolean(process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL);
+
 export function getKv(): KV {
-  switch (process.env.SOCIO_STORE ?? "file") {
+  switch (process.env.SOCIO_STORE ?? (hasUpstash() ? "upstash" : "file")) {
     case "memory":
       return memoryKv;
+    case "upstash":
+      return upstashKv();
     case "supabase":
       return supabaseKv();
     default:
