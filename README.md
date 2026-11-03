@@ -21,6 +21,8 @@ Construido para el **Meta Global AI Developer Hackathon 2026**, track *Build for
 
 **Any business.** Socio isn't tied to one trade. A business profile (corner store, wholesale distributor and hardware store ship as templates) tells the planner how that business talks and sets the approval policy. Connectors cover a demo ERP, a Supabase connector for the *Maxikiosco 24/7* e-commerce (read-only by default, pending verification against the production store) and a generic REST protocol any ERP, CRM or SaaS can implement in an afternoon.
 
+**Why it isn't another WhatsApp chatbot.** WhatsApp AI assistants (Meta's Business AI, Grok Bot integrations, AI front desks) face the *customer*: they answer questions, take bookings and draft replies. Socio faces the *owner and the team*: it writes what happened in the business into the system of record (stock, sales, orders, credit accounts, expenses) and checks every write against real data: catalog, stock and balances. It complements a customer-service bot; it doesn't compete with one.
+
 **Everything in this repository was built during the hackathon.**
 
 ---
@@ -30,6 +32,21 @@ Construido para el **Meta Global AI Developer Hackathon 2026**, track *Build for
 En LatAm, la pyme funciona por WhatsApp. El kiosquero anota el fiado en un cuaderno. El vendedor de la distribuidora manda los pedidos por audio desde la calle. La ferretería lleva la cuenta corriente del plomero de memoria. Muchos ya tienen un sistema, pero nadie tiene tiempo de cargarlo, así que el stock, los pedidos y las deudas se desfasan de la realidad.
 
 Socio es el empleado que completa ese sistema por vos, en el mismo canal que ya usás.
+
+## En qué se diferencia
+
+Los asistentes de IA para WhatsApp que existen (la IA de WhatsApp Business de Meta, las integraciones de Grok Bot o los "recepcionistas" con IA) **atienden al cliente**: responden consultas, toman turnos y redactan respuestas. Socio **trabaja para el dueño y su equipo**: carga lo que pasó en el negocio en el sistema donde vive la información.
+
+| | Bots de atención en WhatsApp | **Socio** |
+|---|---|---|
+| Con quién habla | Con el cliente del negocio | Con el dueño, el cajero o el vendedor en la calle |
+| Qué produce | Respuestas, turnos y borradores de mensajes | Movimientos en el sistema: stock, ventas, pedidos, fiado, cobros, gastos y precios |
+| Contra qué verifica | Contra reglas de texto (precios y horarios cargados) | Contra **datos vivos**: catálogo, stock, cuentas corrientes y lo que el sistema conectado soporta |
+| Dónde queda el dato | En el chat o en el propio bot | En **tu** ERP, POS, e-commerce o planilla, a través de un conector |
+| Fotos | Para armar publicaciones | Para **contar mercadería** con SAM 3.1 y proponer el conteo de stock |
+| Idioma de mostrador | Genérico | Rioplatense y de comercio: fiado, bultos, cajones, "8 lucas", "para el jueves" |
+
+No compite con un bot de atención: lo complementa. El bot conversa con el cliente; Socio deja el sistema al día.
 
 ## Cómo funciona
 
