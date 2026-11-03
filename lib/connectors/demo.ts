@@ -30,16 +30,18 @@ const SEED_CUSTOMERS: Customer[] = [
 
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
-let products = clone(SEED_PRODUCTS);
-let customers = clone(SEED_CUSTOMERS);
+// En globalThis para que todas las rutas de Next compartan el mismo ERP dentro del proceso.
+const g = globalThis as unknown as { __socioDemo?: { products: Product[]; customers: Customer[] } };
+g.__socioDemo ??= { products: clone(SEED_PRODUCTS), customers: clone(SEED_CUSTOMERS) };
+const state = g.__socioDemo;
 
 export function resetDemo() {
-  products = clone(SEED_PRODUCTS);
-  customers = clone(SEED_CUSTOMERS);
+  state.products = clone(SEED_PRODUCTS);
+  state.customers = clone(SEED_CUSTOMERS);
 }
 
 function product(id: string | null | undefined) {
-  const p = products.find((x) => x.id === id);
+  const p = state.products.find((x) => x.id === id);
   if (!p) throw new Error(`Producto inexistente: ${id}`);
   return p;
 }
@@ -58,13 +60,13 @@ export const demoConnector: Connector = {
   ],
   readOnly: false,
   async listProducts() {
-    return clone(products);
+    return clone(state.products);
   },
   async getProduct(id) {
-    return clone(products.find((p) => p.id === id) ?? null);
+    return clone(state.products.find((p) => p.id === id) ?? null);
   },
   async listCustomers() {
-    return clone(customers);
+    return clone(state.customers);
   },
   async execute(a: ResolvedAction) {
     switch (a.type) {
@@ -81,18 +83,22 @@ export const demoConnector: Connector = {
       case "sale.record": {
         const p = product(a.productId);
         p.stock -= a.units ?? 0;
+        let debt = "";
         if (a.payment === "credit" && a.customerId) {
-          const c = customers.find((x) => x.id === a.customerId);
-          if (c) c.balance += a.total ?? 0;
+          const c = state.customers.find((x) => x.id === a.customerId);
+          if (c) {
+            c.balance += a.total ?? 0;
+            debt = `. ${c.name} ahora debe $${c.balance.toLocaleString("es-AR")}`;
+          }
         }
-        return `Venta de ${a.units} × ${p.name} por $${(a.total ?? 0).toLocaleString("es-AR")}. Stock ${a.stockBefore} → ${p.stock}`;
+        return `Venta de ${a.units} × ${p.name} por $${(a.total ?? 0).toLocaleString("es-AR")}. Stock ${a.stockBefore} → ${p.stock}${debt}`;
       }
       case "customer.charge":
       case "customer.payment": {
-        let c = customers.find((x) => x.id === a.customerId);
+        let c = state.customers.find((x) => x.id === a.customerId);
         if (!c) {
           c = { id: `c-${Date.now()}`, name: a.customerName ?? "Cliente", balance: 0 };
-          customers.push(c);
+          state.customers.push(c);
         }
         const delta = a.type === "customer.charge" ? a.amount ?? 0 : -(a.amount ?? 0);
         c.balance += delta;
