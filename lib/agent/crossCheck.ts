@@ -30,6 +30,9 @@ const $ = (n: number) => `$${Math.round(n).toLocaleString("es-AR")}`;
 export function describe(a: ResolvedAction): string {
   const parts = [ACTION_LABELS[a.type]];
   if (a.productName) parts.push(a.productName);
+  if (a.resolvedItems?.length) parts.push(a.resolvedItems.map((i) => `${i.units} × ${i.productName}`).join(", "));
+  if (a.concept) parts.push(a.concept);
+  if (a.dueDate) parts.push(`entrega ${a.dueDate}`);
   if (a.units !== undefined) parts.push(`${a.units} unidades`);
   if (a.total !== undefined) parts.push(`total ${$(a.total)}`);
   if (a.newPrice) parts.push(`precio nuevo ${$(a.newPrice)}`);

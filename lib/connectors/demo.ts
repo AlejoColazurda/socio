@@ -1,44 +1,34 @@
-import type { Customer, Product, ResolvedAction } from "../types";
+import { getTemplate } from "../business";
 import { getKv } from "../kv";
+import type { Customer, Expense, Order, Product, ResolvedAction } from "../types";
 import type { Connector } from "./types";
 
-// ERP de demostración con un catálogo típico de maxikiosco argentino.
-// Se reinicia con resetDemo() para grabar la demo desde cero.
-
-const SEED_PRODUCTS: Product[] = [
-  { id: "p-yerba-playadito-1k", name: "Yerba Playadito 1 kg", brand: "Playadito", price: 5200, stock: 14, unitsPerPack: 10, aliases: ["playadito", "yerba playadito"] },
-  { id: "p-yerba-taragui-1k", name: "Yerba Taragüi 1 kg", brand: "Taragüi", price: 4800, stock: 9, unitsPerPack: 10, aliases: ["taragui", "taragüi"] },
-  { id: "p-coca-225", name: "Coca-Cola 2,25 L", brand: "Coca-Cola", price: 3900, stock: 24, unitsPerPack: 6, aliases: ["coca", "coca cola", "coca grande", "coca de dos y cuarto"] },
-  { id: "p-coca-500", name: "Coca-Cola 500 ml", brand: "Coca-Cola", price: 1600, stock: 40, unitsPerPack: 12, aliases: ["coca chica", "coquita"] },
-  { id: "p-cindor-1l", name: "Leche chocolatada Cindor 1 L", brand: "Cindor", price: 2900, stock: 12, unitsPerPack: 12, aliases: ["cindor"] },
-  { id: "p-leche-serenisima-1l", name: "Leche La Serenísima 1 L", brand: "La Serenísima", price: 1700, stock: 18, unitsPerPack: 12, aliases: ["leche", "serenisima", "la serenisima"] },
-  { id: "p-alfajor-guaymallen", name: "Alfajor Guaymallén", brand: "Guaymallén", price: 450, stock: 60, unitsPerPack: 40, aliases: ["guaymallen", "alfajor"] },
-  { id: "p-alfajor-jorgito", name: "Alfajor Jorgito", brand: "Jorgito", price: 700, stock: 36, unitsPerPack: 24, aliases: ["jorgito"] },
-  { id: "p-galletitas-oreo", name: "Galletitas Oreo 118 g", brand: "Oreo", price: 1500, stock: 20, unitsPerPack: 24, aliases: ["oreo"] },
-  { id: "p-fernet-branca-750", name: "Fernet Branca 750 ml", brand: "Branca", price: 14500, stock: 6, unitsPerPack: 6, aliases: ["fernet", "branca"] },
-  { id: "p-cerveza-quilmes-1l", name: "Cerveza Quilmes 1 L", brand: "Quilmes", price: 2600, stock: 30, unitsPerPack: 12, aliases: ["quilmes", "birra", "cerveza"] },
-  { id: "p-pan-lactal-bimbo", name: "Pan lactal Bimbo", brand: "Bimbo", price: 3100, stock: 8, aliases: ["pan lactal", "bimbo"] },
-  { id: "p-cigarrillos-marlboro", name: "Marlboro box 20", brand: "Marlboro", price: 4200, stock: 50, unitsPerPack: 10, aliases: ["marlboro", "puchos"] },
-  { id: "p-agua-villavicencio-2l", name: "Agua Villavicencio 2 L", brand: "Villavicencio", price: 1400, stock: 22, unitsPerPack: 6, aliases: ["agua", "villavicencio"] },
-  { id: "p-azucar-ledesma-1k", name: "Azúcar Ledesma 1 kg", brand: "Ledesma", price: 1300, stock: 15, unitsPerPack: 10, aliases: ["azucar", "ledesma"] },
-];
-
-const SEED_CUSTOMERS: Customer[] = [
-  { id: "c-ruben", name: "Rubén (el de la esquina)", phone: "", balance: 6400 },
-  { id: "c-marta", name: "Marta Gómez", phone: "", balance: 0 },
-  { id: "c-taller", name: "Taller Los Pibes", phone: "", balance: 18200 },
-];
+// ERP de demostración. Arranca con la plantilla del rubro elegido (SOCIO_BUSINESS=kiosco |
+// distribuidora | ferreteria) y se reinicia con resetDemo() para grabar la demo desde cero.
 
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
 // El estado vive en el KV de Socio para que todas las rutas e instancias vean el mismo ERP.
 interface DemoState {
+  template: string;
   products: Product[];
   customers: Customer[];
+  orders: Order[];
+  expenses: Expense[];
 }
 const KEY = "demo-erp";
-const fresh = (): DemoState => ({ products: clone(SEED_PRODUCTS), customers: clone(SEED_CUSTOMERS) });
-const load = async () => (await getKv().get<DemoState>(KEY)) ?? fresh();
+
+async function fresh(): Promise<DemoState> {
+  const t = await getTemplate();
+  return { template: t.profile.id, products: clone(t.products), customers: clone(t.customers), orders: [], expenses: [] };
+}
+
+async function load(): Promise<DemoState> {
+  const s = await getKv().get<DemoState>(KEY);
+  // Si cambió el rubro activo, arrancamos con su plantilla.
+  if (!s || s.template !== (await getTemplate()).profile.id) return fresh();
+  return { ...s, orders: s.orders ?? [], expenses: s.expenses ?? [] };
+}
 
 let chain: Promise<unknown> = Promise.resolve();
 function mutate<T>(fn: (s: DemoState) => T): Promise<T> {
@@ -53,7 +43,7 @@ function mutate<T>(fn: (s: DemoState) => T): Promise<T> {
 }
 
 export async function resetDemo() {
-  await getKv().set(KEY, fresh());
+  await getKv().set(KEY, await fresh());
 }
 
 function product(s: DemoState, id: string | null | undefined) {
@@ -76,7 +66,7 @@ const $ = (n: number) => `$${n.toLocaleString("es-AR")}`;
 
 export const demoConnector: Connector = {
   id: "demo",
-  name: "ERP demo (Maxikiosco)",
+  name: "ERP demo",
   capabilities: [
     "inventory.adjust",
     "inventory.count",
@@ -84,6 +74,8 @@ export const demoConnector: Connector = {
     "customer.charge",
     "customer.payment",
     "product.price",
+    "order.create",
+    "expense.record",
     "query.stock",
   ],
   readOnly: false,
@@ -95,6 +87,12 @@ export const demoConnector: Connector = {
   },
   async listCustomers() {
     return (await load()).customers;
+  },
+  async listOrders() {
+    return (await load()).orders.slice().reverse();
+  },
+  async listExpenses() {
+    return (await load()).expenses.slice().reverse();
   },
   execute: (a: ResolvedAction) =>
     mutate((s) => {
@@ -134,6 +132,36 @@ export const demoConnector: Connector = {
           const before = p.price;
           p.price = a.newPrice ?? p.price;
           return `${p.name}: precio ${$(before)} → ${$(p.price)}`;
+        }
+        case "order.create": {
+          const c = customer(s, a);
+          const items = a.resolvedItems ?? [];
+          // El pedido reserva la mercadería y queda en la cuenta corriente del comercio.
+          for (const it of items) product(s, it.productId).stock -= it.units ?? 0;
+          c.balance += a.total ?? 0;
+          const order: Order = {
+            id: `PED-${String(s.orders.length + 1).padStart(4, "0")}`,
+            customerId: c.id,
+            customerName: c.name,
+            items,
+            total: a.total ?? 0,
+            dueDate: a.dueDate ?? null,
+            status: "nuevo",
+            createdAt: new Date().toISOString(),
+          };
+          s.orders.push(order);
+          return `${order.id} para ${c.name}: ${items.map((i) => `${i.quantity} × ${i.productName}`).join(", ")} por ${$(order.total)}${order.dueDate ? `, entrega ${order.dueDate}` : ""}`;
+        }
+        case "expense.record": {
+          const e: Expense = {
+            id: `G-${String(s.expenses.length + 1).padStart(4, "0")}`,
+            concept: a.concept ?? "Gasto",
+            amount: a.amount ?? 0,
+            supplier: a.customerName ?? null,
+            createdAt: new Date().toISOString(),
+          };
+          s.expenses.push(e);
+          return `Gasto ${e.id}: ${e.concept} ${$(e.amount)}`;
         }
         case "query.stock": {
           const p = product(s, a.productId);

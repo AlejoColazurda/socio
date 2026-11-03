@@ -1,3 +1,4 @@
+import type { BusinessProfile } from "../business";
 import type { Connector } from "../connectors/types";
 import type { Check, Customer, Product, ProposedAction, ResolvedAction, Risk } from "../types";
 import { evidenceInMessage, findCustomer, pesos } from "./text";
@@ -99,7 +100,49 @@ export async function verifyAction(p: ProposedAction, ctx: VerifyContext): Promi
     }
   }
 
-  const needsCustomer = CUSTOMER_ACTIONS.has(p.type) || (p.type === "sale.record" && p.payment === "credit");
+  if (p.type === "order.create") {
+    const items = p.items ?? [];
+    if (!items.length) fail("items", "El pedido no tiene renglones");
+    const resolved = [];
+    for (const [i, it] of items.entries()) {
+      const label = `Renglón ${i + 1}`;
+      const prod = it.productId && ctx.candidates.some((c) => c.id === it.productId) ? await ctx.connector.getProduct(it.productId) : null;
+      if (!prod) {
+        fail(`item-${i}`, `${label}: producto no identificado en el catálogo`);
+        continue;
+      }
+      const q = it.quantity;
+      if (!q || !Number.isInteger(q) || q <= 0) {
+        fail(`item-${i}`, `${label}: falta una cantidad entera para ${prod.name}`);
+        continue;
+      }
+      let units = q;
+      if (it.unit === "pack") {
+        if (!prod.unitsPerPack) {
+          // En mayoristas el artículo suele ser el bulto mismo: sin unitsPerPack, 1 bulto = 1 unidad de catálogo.
+          units = q;
+        } else units = q * prod.unitsPerPack;
+      }
+      const subtotal = units * prod.price;
+      resolved.push({ ...it, productName: prod.name, units, unitPrice: prod.price, subtotal });
+      if (units > prod.stock) warn(`item-${i}`, `${prod.name}: piden ${units} y hay ${prod.stock}`);
+      else pass(`item-${i}`, `${prod.name}: ${units} × ${pesos(prod.price)} = ${pesos(subtotal)} (hay ${prod.stock})`);
+    }
+    a.resolvedItems = resolved;
+    a.total = resolved.reduce((s, x) => s + (x.subtotal ?? 0), 0);
+    if (resolved.length) pass("total", `Total del pedido ${pesos(a.total)}`);
+    if (p.dueDate) pass("due", `Entrega: ${p.dueDate}`);
+  }
+
+  if (p.type === "expense.record") {
+    if (!p.amount || p.amount <= 0) fail("amount", "Falta el monto del gasto");
+    else pass("amount", `Monto ${pesos(p.amount)}`);
+    if (!p.concept) fail("concept", "Falta el concepto del gasto");
+    else pass("concept", `Concepto: ${p.concept}`);
+  }
+
+  const needsCustomer =
+    CUSTOMER_ACTIONS.has(p.type) || p.type === "order.create" || (p.type === "sale.record" && p.payment === "credit");
   if (needsCustomer) {
     if (!p.customerName) fail("customer", "Falta a qué cliente anotarlo");
     else {
@@ -127,14 +170,15 @@ export async function verifyAction(p: ProposedAction, ctx: VerifyContext): Promi
   return { action: a, checks };
 }
 
-export function riskOf(a: ResolvedAction, checks: Check[]): Risk {
+export function riskOf(a: ResolvedAction, checks: Check[], profile: Pick<BusinessProfile, "autoLimit">): Risk {
   if (checks.some((c) => c.status === "fail")) return "blocked";
   if (a.type === "query.stock") return "auto";
   if (checks.some((c) => c.status === "warn")) return "approval";
-  const autoLimit = Number(process.env.SOCIO_AUTO_LIMIT ?? 20000);
-  // Lo que suma stock o es una venta chica en efectivo pasa solo; tocar plata ajena, precios
-  // o bajar stock siempre pide confirmación del dueño.
+  const autoLimit = profile.autoLimit;
+  // Lo que suma stock, una venta chica en efectivo o un gasto chico pasa solo; tocar cuentas
+  // corrientes, precios, pedidos o bajar stock siempre pide confirmación del dueño.
   if (a.type === "inventory.adjust" && (a.units ?? 0) > 0) return "auto";
   if (a.type === "sale.record" && a.payment !== "credit" && (a.total ?? 0) <= autoLimit) return "auto";
+  if (a.type === "expense.record" && (a.amount ?? 0) <= autoLimit) return "auto";
   return "approval";
 }

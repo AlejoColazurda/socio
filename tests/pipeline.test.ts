@@ -4,10 +4,12 @@ import { verifyAction } from "@/lib/agent/verify";
 import { demoConnector, resetDemo } from "@/lib/connectors/demo";
 import { collectSseText, MOCK_SAM_OUTPUT, parseSamOutput } from "@/lib/meta/sam";
 import { getStore } from "@/lib/store";
+import { setTemplate } from "@/lib/business";
 
 const stockOf = async (id: string) => (await demoConnector.getProduct(id))!.stock;
 
 beforeEach(async () => {
+  await setTemplate("kiosco");
   await resetDemo();
   await getStore().clear();
 });
@@ -110,5 +112,42 @@ describe("SAM 3.1", () => {
   it("arma el texto desde el stream SSE", () => {
     const sse = `event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"<0f> 0<|box;x1=1;y1=2;x2=3;y2=4|><|mask;data=1,1,~0|>"}\n\nevent: response.completed\ndata: {"type":"response.completed"}\n\n`;
     expect(parseSamOutput(collectSseText(sse))[0].boxes).toHaveLength(1);
+  });
+});
+
+describe("cualquier pyme", () => {
+  beforeEach(async () => {
+    await setTemplate("distribuidora");
+    await resetDemo();
+    await getStore().clear();
+  });
+
+  it("distribuidora: un pedido por audio arma el pedido, pide OK y reserva stock", async () => {
+    const { actions } = await handleMessage({ channel: "web", from: "web", text: "el almacén don pepe pide 5 bultos de coca grande para el jueves" });
+    const order = actions[0];
+    expect(order.action.type).toBe("order.create");
+    expect(order.status).toBe("pending_approval");
+    expect(order.action.total).toBe(5 * 21000);
+    const done = await decide(order.id, true, "dueño");
+    expect(done.status).toBe("executed");
+    expect(done.result).toMatch(/PED-0001.*Don Pepe.*jueves/);
+    expect(await stockOf("d-coca-225-x6")).toBe(115);
+    const orders = await demoConnector.listOrders!();
+    expect(orders[0].customerName).toBe("Almacén Don Pepe");
+  });
+
+  it("distribuidora: los gastos quedan registrados (con límite automático en 0 piden OK)", async () => {
+    const { actions } = await handleMessage({ channel: "web", from: "web", text: "pagué 85 lucas de combustible" });
+    expect(actions[0].action).toMatchObject({ type: "expense.record", amount: 85000, concept: "combustible" });
+    expect(actions[0].status).toBe("pending_approval");
+    await decide(actions[0].id, true, "dueño");
+    expect((await demoConnector.listExpenses!())[0]).toMatchObject({ concept: "combustible", amount: 85000 });
+  });
+
+  it("ferretería: venta fiada a una constructora", async () => {
+    await setTemplate("ferreteria");
+    await resetDemo();
+    const { actions } = await handleMessage({ channel: "web", from: "web", text: "vendí 3 bolsas de cemento fiado a la constructora ruiz" });
+    expect(actions[0].action).toMatchObject({ type: "sale.record", customerName: "Constructora Ruiz", total: 30600 });
   });
 });

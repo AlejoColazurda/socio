@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { getProfile } from "../business";
 import { getConnector } from "../connectors";
 import { samCount } from "../meta/sam";
 import { transcribe } from "../meta/transcribe";
@@ -66,7 +67,7 @@ export async function handleMessage(msg: InboundMessage): Promise<{ message: Mes
 
   try {
     const connector = await getConnector();
-    const [catalog, customers] = await Promise.all([connector.listProducts(), connector.listCustomers()]);
+    const [catalog, customers, profile] = await Promise.all([connector.listProducts(), connector.listCustomers(), getProfile()]);
 
     let heard = "";
     if (msg.audioWav) heard = (await t("transcribe", () => transcribe(msg.audioWav!, keywordsFrom(catalog)))).transcript;
@@ -74,7 +75,7 @@ export async function handleMessage(msg: InboundMessage): Promise<{ message: Mes
     record.transcript = message;
 
     const candidates = candidateProducts(catalog, message || catalog.map((p) => p.name).join(" "));
-    const p = await t("plan", () => plan(message, candidates, customers, msg.imageDataUrl));
+    const p = await t("plan", () => plan(message, candidates, customers, profile, msg.imageDataUrl));
     record.summary = p.summary;
     record.clarification = p.clarification;
 
@@ -109,7 +110,7 @@ export async function handleMessage(msg: InboundMessage): Promise<{ message: Mes
 
     for (let i = 0; i < verified.length; i++) {
       const checks = [...verified[i].checks, ...(cross[i] ?? [])];
-      const risk = riskOf(verified[i].action, checks);
+      const risk = riskOf(verified[i].action, checks, profile);
       const rec: ActionRecord = {
         id: randomUUID(),
         messageId: record.id,

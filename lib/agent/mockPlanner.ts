@@ -16,7 +16,7 @@ function num(s: string): number | null {
 }
 
 function money(clause: string): number | null {
-  const lucas = clause.match(/(\d+(?:[.,]\d+)?)\s*lucas?/);
+  const lucas = clause.match(/(\d+(?:[.,]\d+)?)\s*(?:lucas?|mil)\b/);
   if (lucas) return Math.round(Number(lucas[1].replace(",", ".")) * 1000);
   const m = clause.match(/\$\s*([\d.]+)|([\d.]{3,})\s*(?:pesos|mangos)?/);
   if (m) return Number((m[1] ?? m[2]).replace(/\./g, ""));
@@ -35,20 +35,33 @@ function bestProduct(products: Product[], clause: string): Product | null {
 export function mockPlan(message: string, products: Product[], customers: Customer[], hasImage: boolean): Plan {
   const actions: ProposedAction[] = [];
   const raw = message.trim();
-  const clauses = raw.split(/\s*(?:,|\by\b|\.)\s*(?=llegaron|llego|vendi|anotale|anota|fiado|pago|pagó|subi|subile|cambia|cuant|se rompi|se vencieron)/i);
+  const clauses = raw.split(/\s*(?:,|\by\b|\.)\s*(?=llegaron|llego|llegó|vendi|vendí|anotale|anota|fiado|pago|pagó|pagué|subi|subile|cambia|cuant|se rompi|se vencieron)/i);
 
   for (const clauseRaw of clauses) {
     const clause = normalize(clauseRaw);
     const p = bestProduct(products, clause);
     const qtyMatch = clause.match(/\b(\d+|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|doce|veinte)\b/);
     const qty = qtyMatch ? num(qtyMatch[1]) : null;
-    const pack = /\b(caja|cajas|bulto|bultos|pack|packs|fardo|fardos)\b/.test(clause);
+    // "bulto" solo se convierte si el catálogo dice cuántas unidades trae; si no, el artículo ya es el bulto.
+    const pack = /\b(caja|cajas|bulto|bultos|pack|packs|fardo|fardos|cajon|cajones)\b/.test(clause) && Boolean(p?.unitsPerPack);
     const base: Omit<ProposedAction, "type"> = {
       productId: p?.id ?? null, quantity: qty, unit: pack ? "pack" : "unit", unitPrice: null, newPrice: null,
-      customerName: null, amount: null, payment: null, evidence: clauseRaw.trim(),
+      customerName: null, amount: null, payment: null, items: null, concept: null, dueDate: null, evidence: clauseRaw.trim(),
     };
+    const noProduct = { productId: null, quantity: null, unit: null } as const;
 
-    if (/^(llegaron|llego|entraron|me trajeron)/.test(clause)) {
+    if (/\b(pide|pidio|encargo|me encargo)\b/.test(clause)) {
+      const who = clause.match(/^(?:el\s+|la\s+)?(.+?)\s+(?:me\s+)?(?:pide|pidio|encargo)/);
+      const c = findCustomer(customers, who?.[1]);
+      const due = clause.match(/para (?:el |la )?([a-z0-9/]+)/);
+      actions.push({
+        ...base, ...noProduct, type: "order.create", customerName: c?.name ?? who?.[1] ?? null,
+        items: [{ productId: p?.id ?? null, quantity: qty, unit: pack ? "pack" : "unit" }], dueDate: due?.[1] ?? null,
+      });
+    } else if (/^pague\b/.test(clause)) {
+      const concept = clause.match(/\bde\s+([a-z ]+)$/)?.[1]?.trim() ?? null;
+      actions.push({ ...base, ...noProduct, type: "expense.record", amount: money(clause), concept });
+    } else if (/^(llegaron|llego|entraron|me trajeron)/.test(clause)) {
       actions.push({ ...base, type: "inventory.adjust" });
     } else if (/se (rompi|vencieron|vencio)/.test(clause)) {
       actions.push({ ...base, type: "inventory.adjust", quantity: -(qty ?? 1) });
@@ -60,8 +73,8 @@ export function mockPlan(message: string, products: Product[], customers: Custom
       const who = clause.match(/(?:a|al)\s+(?:la\s+|el\s+)?([a-z]+)/);
       const c = findCustomer(customers, who?.[1]);
       actions.push({ ...base, type: "customer.charge", productId: null, quantity: null, unit: null, amount: money(clause), customerName: c?.name ?? who?.[1] ?? null });
-    } else if (/pago|pag/.test(clause)) {
-      const who = clause.match(/^(?:el\s+|la\s+)?([a-z]+)\s+(?:me\s+)?pag/) ?? clause.match(/pag[a-z]*\s+(?:el\s+|la\s+)?([a-z]+)/);
+    } else if (/pago|pag|transfiri/.test(clause)) {
+      const who = clause.match(/^(?:el\s+|la\s+)?([a-z]+)\s+(?:me\s+)?(?:pag|transfiri)/) ?? clause.match(/pag[a-z]*\s+(?:el\s+|la\s+)?([a-z]+)/);
       const c = findCustomer(customers, who?.[1]);
       actions.push({ ...base, type: "customer.payment", productId: null, quantity: null, unit: null, amount: money(clause), customerName: c?.name ?? who?.[1] ?? null });
     } else if (/subi|subile|cambia|precio/.test(clause)) {
@@ -79,7 +92,10 @@ export function mockPlan(message: string, products: Product[], customers: Custom
     });
   }
 
-  const missing = actions.some((a) => a.type !== "customer.charge" && a.type !== "customer.payment" && !a.productId);
+  const noProductTypes = new Set(["customer.charge", "customer.payment", "expense.record", "order.create"]);
+  const missing =
+    actions.some((a) => !noProductTypes.has(a.type) && !a.productId) ||
+    actions.some((a) => a.type === "order.create" && a.items?.some((i) => !i.productId));
   return {
     summary: actions.length ? `Entendí ${actions.length} cosa(s) para hacer.` : "No encontré nada para hacer.",
     actions,

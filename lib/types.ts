@@ -8,17 +8,53 @@ export type ActionType =
   | "customer.charge" // fiado: suma deuda a un cliente
   | "customer.payment" // el cliente paga parte o toda su deuda
   | "product.price" // cambio de precio
+  | "order.create" // pedido de un cliente para preparar/entregar (distribuidoras, mayoristas)
+  | "expense.record" // gasto o pago a proveedor (luz, combustible, mercadería)
   | "query.stock"; // consulta, no modifica nada
 
 export const ACTION_LABELS: Record<ActionType, string> = {
   "inventory.adjust": "Ajuste de stock",
   "inventory.count": "Conteo de stock",
   "sale.record": "Venta",
-  "customer.charge": "Fiado",
-  "customer.payment": "Pago de cliente",
+  "customer.charge": "Cuenta corriente (fiado)",
+  "customer.payment": "Cobro a cliente",
   "product.price": "Cambio de precio",
+  "order.create": "Pedido",
+  "expense.record": "Gasto",
   "query.stock": "Consulta de stock",
 };
+
+export interface OrderItem {
+  productId: string | null;
+  quantity: number | null;
+  unit: "unit" | "pack" | null;
+}
+
+export interface ResolvedOrderItem extends OrderItem {
+  productName?: string;
+  units?: number;
+  unitPrice?: number;
+  subtotal?: number;
+}
+
+export interface Order {
+  id: string;
+  customerId?: string;
+  customerName: string;
+  items: ResolvedOrderItem[];
+  total: number;
+  dueDate?: string | null;
+  status: "nuevo" | "preparado" | "entregado";
+  createdAt: string;
+}
+
+export interface Expense {
+  id: string;
+  concept: string;
+  amount: number;
+  supplier?: string | null;
+  createdAt: string;
+}
 
 export interface Product {
   id: string;
@@ -48,6 +84,12 @@ export interface ProposedAction {
   customerName?: string | null;
   amount?: number | null;
   payment?: "cash" | "transfer" | "credit" | null;
+  /** Renglones de un pedido (order.create). */
+  items?: OrderItem[] | null;
+  /** Concepto de un gasto (expense.record): "luz", "combustible", "proveedor de bebidas". */
+  concept?: string | null;
+  /** Fecha de entrega pedida, tal como la dijo ("jueves", "mañana", "15/11"). */
+  dueDate?: string | null;
   /** Fragmento literal del mensaje que justifica la acción. Se valida contra el transcript. */
   evidence: string;
 }
@@ -61,6 +103,7 @@ export interface ResolvedAction extends ProposedAction {
   customerId?: string;
   customerIsNew?: boolean;
   total?: number;
+  resolvedItems?: ResolvedOrderItem[];
 }
 
 export type CheckStatus = "pass" | "warn" | "fail";

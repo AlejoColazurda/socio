@@ -1,13 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ActionRecord, Customer, MessageRecord, Product } from "@/lib/types";
+import type { ActionRecord, Customer, Expense, MessageRecord, Order, Product } from "@/lib/types";
 import { ACTION_LABELS } from "@/lib/types";
 import { blobToWav16k, fileToDataUrl, toBase64 } from "./wav";
 
 interface State {
   connector: { id: string; name: string; readOnly: boolean; capabilities: string[] };
   mock: boolean;
+  profile: { id: string; name: string; rubro: string; examples: string[]; autoLimit: number };
+  templates: { id: string; name: string; rubro: string }[];
+  orders: Order[];
+  expenses: Expense[];
   messages: MessageRecord[];
   actions: ActionRecord[];
   products: Product[];
@@ -33,14 +37,6 @@ const STATUS: Record<string, string> = {
 };
 
 const $ = (n: number) => `$${Math.round(n).toLocaleString("es-AR")}`;
-
-const EXAMPLES = [
-  "llegaron dos cajas de playadito",
-  "vendí 2 fernet fiado a ruben",
-  "el taller me pagó 10 lucas",
-  "subile la coca grande a 4500",
-  "cuántas oreo quedan?",
-];
 
 export default function Home() {
   const [state, setState] = useState<State | null>(null);
@@ -142,8 +138,8 @@ export default function Home() {
     refresh();
   }
 
-  async function reset() {
-    await fetch("/api/reset", { method: "POST" });
+  async function reset(template?: string) {
+    await fetch("/api/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ template }) });
     setBubbles([{ id: "hi", who: "bot", text: "Arrancamos de cero. ¿Qué anotamos?" }]);
     prevStock.current = {};
     refresh();
@@ -165,7 +161,19 @@ export default function Home() {
           <span className="pill">Conectado a: {state?.connector.name ?? "…"}{state?.connector.readOnly ? " (solo lectura)" : ""}</span>
           {state?.mock && <span className="pill">modo simulado</span>}
           {state?.connector.id === "demo" && (
-            <button className="btn" onClick={reset}>Reiniciar demo</button>
+            <>
+              <select
+                className="btn"
+                value={state.profile.id}
+                onChange={(e) => reset(e.target.value)}
+                aria-label="Rubro del negocio"
+              >
+                {state.templates.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name} · {t.rubro}</option>
+                ))}
+              </select>
+              <button className="btn" onClick={() => reset()}>Reiniciar demo</button>
+            </>
           )}
         </div>
       </header>
@@ -173,7 +181,7 @@ export default function Home() {
       <div className="grid">
         <section className="card phone">
           <div className="head">
-            Socio
+            Socio · {state?.profile.name ?? "tu negocio"}
             <small>{busy ? "escribiendo…" : "en línea"}</small>
           </div>
           <div className="chat" ref={chatRef}>
@@ -207,7 +215,7 @@ export default function Home() {
             )}
           </div>
           <div className="compose" style={{ flexWrap: "wrap", gap: 4 }}>
-            {EXAMPLES.map((e) => (
+            {(state?.profile.examples ?? []).map((e) => (
               <button key={e} className="btn" onClick={() => sendText(e)} disabled={busy}>{e}</button>
             ))}
           </div>
@@ -276,6 +284,42 @@ export default function Home() {
               ))}
             </tbody>
           </table>
+          {!!state?.orders.length && (
+            <>
+              <h2 style={{ borderTop: "1px solid var(--line)" }}>Pedidos</h2>
+              <table>
+                <tbody>
+                  {state.orders.map((o) => (
+                    <tr key={o.id}>
+                      <td>
+                        <b>{o.id}</b> · {o.customerName}
+                        <br />
+                        <small style={{ color: "var(--muted)" }}>
+                          {o.items.map((i) => `${i.units} × ${i.productName}`).join(", ")}{o.dueDate ? ` · entrega ${o.dueDate}` : ""}
+                        </small>
+                      </td>
+                      <td className="n">{$(o.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+          {!!state?.expenses.length && (
+            <>
+              <h2 style={{ borderTop: "1px solid var(--line)" }}>Gastos</h2>
+              <table>
+                <tbody>
+                  {state.expenses.map((e) => (
+                    <tr key={e.id}>
+                      <td>{e.concept}{e.supplier ? ` · ${e.supplier}` : ""}</td>
+                      <td className="n">{$(e.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
           {!!state?.customers.length && (
             <>
               <h2 style={{ borderTop: "1px solid var(--line)" }}>Cuentas corrientes</h2>
