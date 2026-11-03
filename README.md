@@ -141,7 +141,9 @@ Socio responde 200 enseguida y procesa en segundo plano. No duplica si Meta rein
 
 ### Deploy en Vercel
 
-El estado tiene que ser compartido entre instancias. Para eso, configurá `SOCIO_STORE=supabase` con un proyecto Supabase **propio de Socio** (nunca el del cliente) y esta tabla:
+**En vivo:** https://socio-xi-one.vercel.app
+
+El estado tiene que ser compartido entre instancias. La forma recomendada es conectar **Upstash for Redis** desde Vercel → Storage. Socio detecta `KV_REST_API_URL` y `KV_REST_API_TOKEN` y lo usa automáticamente. Como alternativa, configurá `SOCIO_STORE=supabase` con un proyecto Supabase **propio de Socio** (nunca el del cliente) y esta tabla:
 
 ```sql
 create table socio_kv (key text primary key, value jsonb not null, updated_at timestamptz default now());
