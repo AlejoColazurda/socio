@@ -19,7 +19,7 @@ Construido para el **Meta Global AI Developer Hackathon 2026**, track *Build for
 5. runs an **independent Muse Spark auditor** that re-reads the message against the resolved actions;
 6. auto-executes low-risk actions and asks the owner for a **one-tap WhatsApp approval** on anything sensitive, then re-verifies against fresh state before executing.
 
-**Any business.** Socio isn't tied to one trade. A business profile (corner store, wholesale distributor and hardware store ship as templates) tells the planner how that business talks and sets the approval policy. Connectors cover a demo ERP, a live Supabase store (the *Maxikiosco 24/7* e-commerce, read-only by default) and a generic REST protocol any ERP, CRM or SaaS can implement in an afternoon.
+**Any business.** Socio isn't tied to one trade. A business profile (corner store, wholesale distributor and hardware store ship as templates) tells the planner how that business talks and sets the approval policy. Connectors cover a demo ERP, a Supabase connector for the *Maxikiosco 24/7* e-commerce (read-only by default, pending verification against the production store) and a generic REST protocol any ERP, CRM or SaaS can implement in an afternoon.
 
 **Everything in this repository was built during the hackathon.**
 
@@ -117,7 +117,7 @@ Acciones: `inventory.adjust`, `inventory.count`, `sale.record`, `order.create`, 
 | **Muse Voice Transcribe** (`muse-voice-transcribe-1.0`) | `POST /v1/asr/transcribe` (multipart, WAV 16 kHz) | Notas de voz de WhatsApp (OGG/Opus → WAV con ffmpeg), con `keywords` tomadas del catálogo |
 | **SAM 3.1** (`sam-3.1`) | `POST /v1/responses` (stream) | Conteo de artículos en fotos, con un parser propio de la salida de cajas y máscaras |
 
-Los IDs de modelo son configurables, y `GET /api/health` confirma que existen en tu cuenta.
+Los IDs de modelo son configurables (`SOCIO_*_MODEL`), y `GET /api/health` confirma que existen en tu cuenta antes de usarlos.
 
 ## Correrlo
 
@@ -163,5 +163,6 @@ tests/          circuito completo, verificación, parser de SAM, conversión de 
 
 - ✅ Circuito completo (texto, audio, foto, verificación, aprobación y ejecución) con 17 tests en modo simulado.
 - ✅ Tres rubros y tres conectores.
+- ⏳ En verificación contra la API real: formato de `languageBias`/`keywords` en Voice Transcribe (si los rechaza, se reintenta sin ellos), imagen como data URL en SAM 3.1, y el conector `mk247` contra la base de producción.
 - 🔜 Pilotos con el Maxikiosco 24/7 y con distribuidoras que ya son clientes.
 - 🔜 Conectores nativos para Google Sheets, Tiendanube y Mercado Libre, y facturación electrónica (ARCA).
