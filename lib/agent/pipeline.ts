@@ -79,11 +79,23 @@ export async function handleMessage(msg: InboundMessage): Promise<{ message: Mes
     record.clarification = p.clarification;
 
     let proposed: ProposedAction[] = p.actions ?? [];
-    const visionIdx = proposed.findIndex((a) => a.type === "inventory.count" && (a.quantity === null || a.quantity === undefined));
+    let visionIdx = -1;
     if (msg.imageDataUrl && p.vision?.nounPhrase) {
       const v = await t("sam", () => samCount(msg.imageDataUrl!, p.vision!.nounPhrase));
       record.vision = { prompt: p.vision.nounPhrase, count: v.count, boxes: v.boxes.map((b) => [b.x1, b.y1, b.x2, b.y2]) };
-      if (visionIdx >= 0) proposed = proposed.map((a, i) => (i === visionIdx ? { ...a, quantity: v.count, unit: "unit" } : a));
+      visionIdx = proposed.findIndex((a) => a.type === "inventory.count" && (a.quantity === null || a.quantity === undefined));
+      if (visionIdx < 0) {
+        // El conteo de SAM nunca se pierde: si el plan no trajo la acción, la armamos en código.
+        proposed = [
+          ...proposed,
+          {
+            type: "inventory.count", productId: p.vision.productId, quantity: null, unit: "unit", unitPrice: null,
+            newPrice: null, customerName: null, amount: null, payment: null, evidence: message || "foto",
+          },
+        ];
+        visionIdx = proposed.length - 1;
+      }
+      proposed = proposed.map((a, i) => (i === visionIdx ? { ...a, quantity: v.count, unit: "unit" } : a));
     }
 
     const verified = await t("verify", () =>
@@ -153,9 +165,14 @@ export function buildReply(m: MessageRecord, actions: ActionRecord[]): string {
 /** El dueño confirma: se vuelve a verificar contra el estado actual antes de ejecutar. */
 export async function decide(actionId: string, approve: boolean, by: string): Promise<ActionRecord> {
   const store = getStore();
-  const rec = await store.getAction(actionId);
-  if (!rec) throw new Error("Acción inexistente");
-  if (rec.status !== "pending_approval") return rec;
+  // claimAction la marca "processing" antes de cualquier await: un doble toque en el botón
+  // de WhatsApp (o en el panel) no puede ejecutarla dos veces.
+  const rec = await store.claimAction(actionId);
+  if (!rec) {
+    const current = await store.getAction(actionId);
+    if (!current) throw new Error("Acción inexistente");
+    return current;
+  }
 
   rec.decidedAt = now();
   rec.decidedBy = by;

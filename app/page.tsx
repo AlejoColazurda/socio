@@ -26,6 +26,7 @@ const STATUS: Record<string, string> = {
   executed: "Ejecutado",
   answered: "Respondido",
   pending_approval: "Esperando OK",
+  processing: "Procesando",
   blocked: "Bloqueado",
   rejected: "Cancelado",
   failed: "Falló",

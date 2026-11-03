@@ -8,7 +8,7 @@ export async function POST() {
   if ((process.env.SOCIO_CONNECTOR ?? "demo") !== "demo") {
     return Response.json({ error: "Solo disponible con el conector demo" }, { status: 400 });
   }
-  resetDemo();
+  await resetDemo();
   await getStore().clear();
   return Response.json({ ok: true });
 }

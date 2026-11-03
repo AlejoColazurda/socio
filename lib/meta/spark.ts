@@ -29,7 +29,9 @@ export async function sparkJson<T>(input: JsonCallInput): Promise<T> {
       ],
       response_format: {
         type: "json_schema",
-        json_schema: { name: input.schemaName, strict: true, schema: input.schema },
+        // strict:false: la salida igual queda restringida al schema, y evitamos el 400 si el
+        // subconjunto estricto no admite tipos nullable ("string" | null).
+        json_schema: { name: input.schemaName, strict: false, schema: input.schema },
       },
     }),
   });

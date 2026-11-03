@@ -8,7 +8,7 @@ import { getStore } from "@/lib/store";
 const stockOf = async (id: string) => (await demoConnector.getProduct(id))!.stock;
 
 beforeEach(async () => {
-  resetDemo();
+  await resetDemo();
   await getStore().clear();
 });
 
@@ -50,6 +50,21 @@ describe("pipeline", () => {
     await handleMessage(msg);
     await handleMessage(msg);
     expect(await stockOf("p-yerba-playadito-1k")).toBe(34);
+  });
+
+  it("un doble toque en Aprobar ejecuta una sola vez", async () => {
+    const { actions } = await handleMessage({ channel: "web", from: "web", text: "vendí 2 fernet fiado a ruben" });
+    const [a, b] = await Promise.all([decide(actions[0].id, true, "dueño"), decide(actions[0].id, true, "dueño")]);
+    expect([a.status, b.status].filter((s) => s === "executed").length).toBeGreaterThanOrEqual(1);
+    expect(await stockOf("p-fernet-branca-750")).toBe(4);
+  });
+
+  it("fiado a un cliente sin cuenta: avisa, y al aprobar crea la cuenta con la deuda", async () => {
+    const { actions } = await handleMessage({ channel: "web", from: "web", text: "vendí 1 fernet fiado a carlitos" });
+    expect(actions[0].checks.find((c) => c.id === "customer")?.status).toBe("warn");
+    await decide(actions[0].id, true, "dueño");
+    const carlitos = (await demoConnector.listCustomers()).find((c) => c.name === "carlitos");
+    expect(carlitos?.balance).toBe(14500);
   });
 
   it("una foto se cuenta con SAM y pide confirmar el conteo", async () => {

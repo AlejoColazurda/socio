@@ -73,4 +73,8 @@ npm run dev                  # http://localhost:3000
 
 - Circuito completo probado en modo simulado (tests + panel).
 - Pendiente de validar con clave real: formato de `languageBias`/`keywords` en Voice Transcribe (hay reintento sin ellos si el servidor los rechaza) y si SAM 3.1 acepta la imagen como data URL.
-- El estado propio usa un archivo JSON (`.data/`). Para producción en Vercel hace falta una base persistente.
+- Estado propio: archivos JSON en `.data/` para desarrollo local. En Vercel, `SOCIO_STORE=supabase` con un proyecto Supabase propio de Socio y esta tabla:
+
+  ```sql
+  create table socio_kv (key text primary key, value jsonb not null, updated_at timestamptz default now());
+  ```

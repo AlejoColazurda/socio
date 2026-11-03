@@ -75,6 +75,7 @@ export type Risk = "auto" | "approval" | "blocked";
 
 export type ActionStatus =
   | "pending_approval"
+  | "processing"
   | "executed"
   | "rejected"
   | "blocked"

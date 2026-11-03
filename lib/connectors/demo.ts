@@ -1,8 +1,9 @@
 import type { Customer, Product, ResolvedAction } from "../types";
+import { getKv } from "../kv";
 import type { Connector } from "./types";
 
 // ERP de demostración con un catálogo típico de maxikiosco argentino.
-// Persiste en memoria del proceso; para la demo se reinicia con reset().
+// Se reinicia con resetDemo() para grabar la demo desde cero.
 
 const SEED_PRODUCTS: Product[] = [
   { id: "p-yerba-playadito-1k", name: "Yerba Playadito 1 kg", brand: "Playadito", price: 5200, stock: 14, unitsPerPack: 10, aliases: ["playadito", "yerba playadito"] },
@@ -30,21 +31,48 @@ const SEED_CUSTOMERS: Customer[] = [
 
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 
-// En globalThis para que todas las rutas de Next compartan el mismo ERP dentro del proceso.
-const g = globalThis as unknown as { __socioDemo?: { products: Product[]; customers: Customer[] } };
-g.__socioDemo ??= { products: clone(SEED_PRODUCTS), customers: clone(SEED_CUSTOMERS) };
-const state = g.__socioDemo;
+// El estado vive en el KV de Socio para que todas las rutas e instancias vean el mismo ERP.
+interface DemoState {
+  products: Product[];
+  customers: Customer[];
+}
+const KEY = "demo-erp";
+const fresh = (): DemoState => ({ products: clone(SEED_PRODUCTS), customers: clone(SEED_CUSTOMERS) });
+const load = async () => (await getKv().get<DemoState>(KEY)) ?? fresh();
 
-export function resetDemo() {
-  state.products = clone(SEED_PRODUCTS);
-  state.customers = clone(SEED_CUSTOMERS);
+let chain: Promise<unknown> = Promise.resolve();
+function mutate<T>(fn: (s: DemoState) => T): Promise<T> {
+  const run = chain.then(async () => {
+    const s = await load();
+    const r = fn(s);
+    await getKv().set(KEY, s);
+    return r;
+  });
+  chain = run.catch(() => {});
+  return run;
 }
 
-function product(id: string | null | undefined) {
-  const p = state.products.find((x) => x.id === id);
+export async function resetDemo() {
+  await getKv().set(KEY, fresh());
+}
+
+function product(s: DemoState, id: string | null | undefined) {
+  const p = s.products.find((x) => x.id === id);
   if (!p) throw new Error(`Producto inexistente: ${id}`);
   return p;
 }
+
+/** Cliente existente o cuenta nueva (la verificación ya avisó y el dueño aprobó). */
+function customer(s: DemoState, a: ResolvedAction) {
+  let c = s.customers.find((x) => x.id === a.customerId);
+  if (!c) {
+    c = { id: `c-${Date.now()}`, name: a.customerName ?? "Cliente", balance: 0 };
+    s.customers.push(c);
+  }
+  return c;
+}
+
+const $ = (n: number) => `$${n.toLocaleString("es-AR")}`;
 
 export const demoConnector: Connector = {
   id: "demo",
@@ -60,60 +88,57 @@ export const demoConnector: Connector = {
   ],
   readOnly: false,
   async listProducts() {
-    return clone(state.products);
+    return (await load()).products;
   },
   async getProduct(id) {
-    return clone(state.products.find((p) => p.id === id) ?? null);
+    return (await load()).products.find((p) => p.id === id) ?? null;
   },
   async listCustomers() {
-    return clone(state.customers);
+    return (await load()).customers;
   },
-  async execute(a: ResolvedAction) {
-    switch (a.type) {
-      case "inventory.adjust": {
-        const p = product(a.productId);
-        p.stock += a.units ?? 0;
-        return `${p.name}: stock ${a.stockBefore} → ${p.stock}`;
-      }
-      case "inventory.count": {
-        const p = product(a.productId);
-        p.stock = a.units ?? p.stock;
-        return `${p.name}: stock fijado en ${p.stock}`;
-      }
-      case "sale.record": {
-        const p = product(a.productId);
-        p.stock -= a.units ?? 0;
-        let debt = "";
-        if (a.payment === "credit" && a.customerId) {
-          const c = state.customers.find((x) => x.id === a.customerId);
-          if (c) {
+  execute: (a: ResolvedAction) =>
+    mutate((s) => {
+      switch (a.type) {
+        case "inventory.adjust": {
+          const p = product(s, a.productId);
+          const before = p.stock;
+          p.stock += a.units ?? 0;
+          return `${p.name}: stock ${before} → ${p.stock}`;
+        }
+        case "inventory.count": {
+          const p = product(s, a.productId);
+          p.stock = a.units ?? p.stock;
+          return `${p.name}: stock fijado en ${p.stock}`;
+        }
+        case "sale.record": {
+          const p = product(s, a.productId);
+          const before = p.stock;
+          p.stock -= a.units ?? 0;
+          let debt = "";
+          if (a.payment === "credit") {
+            const c = customer(s, a);
             c.balance += a.total ?? 0;
-            debt = `. ${c.name} ahora debe $${c.balance.toLocaleString("es-AR")}`;
+            debt = `. ${c.name} ahora debe ${$(c.balance)}`;
           }
+          return `Venta de ${a.units} × ${p.name} por ${$(a.total ?? 0)}. Stock ${before} → ${p.stock}${debt}`;
         }
-        return `Venta de ${a.units} × ${p.name} por $${(a.total ?? 0).toLocaleString("es-AR")}. Stock ${a.stockBefore} → ${p.stock}${debt}`;
-      }
-      case "customer.charge":
-      case "customer.payment": {
-        let c = state.customers.find((x) => x.id === a.customerId);
-        if (!c) {
-          c = { id: `c-${Date.now()}`, name: a.customerName ?? "Cliente", balance: 0 };
-          state.customers.push(c);
+        case "customer.charge":
+        case "customer.payment": {
+          const c = customer(s, a);
+          const delta = a.type === "customer.charge" ? a.amount ?? 0 : -(a.amount ?? 0);
+          c.balance += delta;
+          return `${c.name}: deuda ${$(c.balance - delta)} → ${$(c.balance)}`;
         }
-        const delta = a.type === "customer.charge" ? a.amount ?? 0 : -(a.amount ?? 0);
-        c.balance += delta;
-        return `${c.name}: deuda $${(c.balance - delta).toLocaleString("es-AR")} → $${c.balance.toLocaleString("es-AR")}`;
+        case "product.price": {
+          const p = product(s, a.productId);
+          const before = p.price;
+          p.price = a.newPrice ?? p.price;
+          return `${p.name}: precio ${$(before)} → ${$(p.price)}`;
+        }
+        case "query.stock": {
+          const p = product(s, a.productId);
+          return `${p.name}: quedan ${p.stock} unidades`;
+        }
       }
-      case "product.price": {
-        const p = product(a.productId);
-        const before = p.price;
-        p.price = a.newPrice ?? p.price;
-        return `${p.name}: precio $${before.toLocaleString("es-AR")} → $${p.price.toLocaleString("es-AR")}`;
-      }
-      case "query.stock": {
-        const p = product(a.productId);
-        return `${p.name}: quedan ${p.stock} unidades`;
-      }
-    }
-  },
+    }),
 };
