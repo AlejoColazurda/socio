@@ -28,7 +28,13 @@ const PAYMENT: Record<string, string> = { cash: "efectivo", transfer: "transfere
 const $ = (n: number) => `$${Math.round(n).toLocaleString("es-AR")}`;
 
 export function describe(a: ResolvedAction): string {
-  const parts = [ACTION_LABELS[a.type]];
+  const label =
+    a.type === "inventory.adjust"
+      ? (a.units ?? a.quantity ?? 0) >= 0
+        ? "Entrada de mercadería"
+        : "Baja de stock (rotura / vencido)"
+      : ACTION_LABELS[a.type];
+  const parts = [label];
   if (a.productName) parts.push(a.productName);
   if (a.resolvedItems?.length) parts.push(a.resolvedItems.map((i) => `${i.units} × ${i.productName}`).join(", "));
   if (a.concept) parts.push(a.concept);
@@ -51,10 +57,14 @@ export async function crossCheck(message: string, actions: ResolvedAction[]): Pr
       model: models.verifier(),
       system:
         "Sos un auditor. Te paso el mensaje de un comerciante y las operaciones que un asistente va a cargar en su sistema. " +
-        "Para cada operación decí si el mensaje la pide exactamente así (producto, cantidad, montos, cliente). " +
-        "Sé estricto: ante la duda, agrees = false. reason en español, una línea.",
+        "Los nombres completos de los artículos (marca, tamaño), los precios de lista, la conversión de cajas a unidades y " +
+        "los nombres completos de los clientes salen del catálogo y ya fueron verificados en código: NO los objetes porque " +
+        "el mensaje no los diga. Tu trabajo es decir si el mensaje pide ESA operación: el tipo (entrada, venta, fiado, cobro, " +
+        "pedido, gasto, precio, consulta), el artículo o cliente al que se refiere, y la cantidad o monto que dijo. " +
+        "Si algo de eso contradice el mensaje o no está pedido, agrees = false. reason en español, una línea corta.",
       text: `Mensaje:\n"""${message}"""\n\nOperaciones:\n${list}`,
       schemaName: "socio_cross_check",
+      reasoningEffort: process.env.SOCIO_VERIFIER_EFFORT || "minimal",
       schema: SCHEMA,
     });
     return actions.map((_, i) => {

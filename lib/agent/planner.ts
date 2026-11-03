@@ -136,6 +136,7 @@ export async function plan(
     text: message || "(mensaje sin texto, solo foto)",
     images: imageDataUrl ? [imageDataUrl] : [],
     schemaName: "socio_plan",
+    reasoningEffort: process.env.SOCIO_PLANNER_EFFORT || "low",
     schema: PLAN_SCHEMA as unknown as Record<string, unknown>,
   });
 }

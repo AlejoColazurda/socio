@@ -10,6 +10,8 @@ export interface JsonCallInput {
   schemaName: string;
   schema: Record<string, unknown>;
   temperature?: number;
+  /** minimal | low | medium | high | max: menos razonamiento = respuesta más rápida. */
+  reasoningEffort?: string;
 }
 
 /** Chat Completions con response_format json_schema (dev.meta.ai/docs/structured-output). */
@@ -24,6 +26,7 @@ export async function sparkJson<T>(input: JsonCallInput): Promise<T> {
       body: JSON.stringify({
         model: input.model,
         temperature: input.temperature ?? 0,
+        ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {}),
         messages: [
           { role: "system", content: system },
           { role: "user", content },
