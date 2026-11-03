@@ -26,7 +26,15 @@ export function verifySignature(rawBody: string, header: string | null): boolean
 
 export function isOwner(from: string): boolean {
   const owners = (process.env.SOCIO_OWNER_NUMBERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  return owners.length === 0 || owners.includes(from);
+  // Celulares de Argentina: WhatsApp manda 549… pero el dueño puede haberlo cargado como 54… (o al revés).
+  return owners.length === 0 || owners.some((o) => argentineVariants(o).includes(from));
+}
+
+/** 5491112345678 ⇄ 541112345678: las dos formas en que aparece un celular argentino en la API. */
+export function argentineVariants(n: string): string[] {
+  if (n.startsWith("549")) return [n, `54${n.slice(3)}`];
+  if (n.startsWith("54")) return [n, `549${n.slice(2)}`];
+  return [n];
 }
 
 async function api(path: string, body: unknown) {
@@ -39,21 +47,28 @@ async function api(path: string, body: unknown) {
   return res.json();
 }
 
+/**
+ * Envía un mensaje. Si el número es argentino y WhatsApp lo rechaza por no estar en la lista
+ * permitida (error 131030 en números de prueba), reintenta con la otra forma (con o sin el 9).
+ */
+async function send(to: string, payload: Record<string, unknown>) {
+  const [first, ...rest] = argentineVariants(to);
+  try {
+    return await api(`${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`, { messaging_product: "whatsapp", to: first, ...payload });
+  } catch (e) {
+    if (!rest.length || !String((e as Error).message).includes("131030")) throw e;
+    return api(`${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`, { messaging_product: "whatsapp", to: rest[0], ...payload });
+  }
+}
+
 export function sendText(to: string, text: string) {
-  return api(`${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
-    messaging_product: "whatsapp",
-    to,
-    type: "text",
-    text: { body: text.slice(0, 4096) },
-  });
+  return send(to, { type: "text", text: { body: text.slice(0, 4096) } });
 }
 
 /** Botones de aprobación (WhatsApp permite hasta 3 por mensaje, títulos de hasta 20 caracteres). */
 export function sendApproval(to: string, a: ActionRecord) {
   const warns = a.checks.filter((c) => c.status === "warn").map((c) => `• ${c.message}`);
-  return api(`${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
-    messaging_product: "whatsapp",
-    to,
+  return send(to, {
     type: "interactive",
     interactive: {
       type: "button",
